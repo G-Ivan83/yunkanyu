@@ -18,6 +18,39 @@ interface AnalysisResult {
 
 // --- Components ---
 
+function StaggeredImageGallery({ images }: { images: string[] }) {
+  const [loadedCount, setLoadedCount] = React.useState(0);
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+      {images.map((imgSrc, idx) => (
+        <div key={idx} className="group relative aspect-[4/3] bg-ink/5 overflow-hidden border border-ink/10 flex flex-col">
+          {idx <= loadedCount ? (
+            <img 
+              src={imgSrc} 
+              alt={`意境图 ${idx + 1}`} 
+              className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110" 
+              onLoad={() => setLoadedCount(prev => Math.max(prev, idx + 1))}
+              onError={() => setLoadedCount(prev => Math.max(prev, idx + 1))}
+            />
+          ) : (
+            <div className="absolute inset-0 flex items-center justify-center bg-ink/5">
+              <div className="w-8 h-8 border-2 border-ink/20 border-t-ink rounded-full animate-spin" />
+            </div>
+          )}
+          <div className="absolute inset-0 bg-gradient-to-t from-ink/90 via-ink/20 to-transparent opacity-80 pointer-events-none" />
+          <div className="relative z-10 p-6 mt-auto pointer-events-none">
+            <div className="flex items-center gap-2 mt-4">
+              <div className="h-[1px] w-8 bg-gold/50" />
+              <p className="text-gold text-xs tracking-[0.2em]">图卷 {idx + 1}</p>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function App() {
   const [appState, setAppState] = useState<AppState>('landing');
   const [apiKey, setApiKey] = useState(import.meta.env.VITE_GEMINI_API_KEY || '');
@@ -427,22 +460,13 @@ const ResultsView: React.FC<{ analysis: AnalysisResult, imagePreview: string, on
             <Sparkles className="w-8 h-8 text-ink opacity-80" strokeWidth={1.5} />
             <h3 className="text-3xl font-calligraphy tracking-[0.2em]">意境参考</h3>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            {analysis.generatedImages && analysis.generatedImages.length > 0 ? analysis.generatedImages.map((imgSrc, idx) => (
-              <div key={idx} className="group relative aspect-[4/3] bg-ink/5 overflow-hidden border border-ink/10 flex flex-col">
-                <img src={imgSrc} alt={`意境图 ${idx + 1}`} className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-110" />
-                <div className="absolute inset-0 bg-gradient-to-t from-ink/90 via-ink/20 to-transparent opacity-80" />
-                <div className="relative z-10 p-6 mt-auto">
-                  <div className="flex items-center gap-2 mt-4">
-                    <div className="h-[1px] w-8 bg-gold/50" />
-                    <p className="text-gold text-xs tracking-[0.2em]">图卷 {idx + 1}</p>
-                  </div>
-                </div>
-              </div>
-            )) : (
-              <p className="text-charcoal/50 text-sm tracking-widest col-span-2">未能成功生成意境图，请稍后重试。</p>
-            )}
-          </div>
+          {analysis.generatedImages && analysis.generatedImages.length > 0 ? (
+            <StaggeredImageGallery images={analysis.generatedImages} />
+          ) : (
+            <div className="aspect-[4/3] bg-ink/5 border border-ink/10 flex items-center justify-center">
+              <p className="text-ink/50 tracking-widest">未能成功生成意境图，请稍后重试。</p>
+            </div>
+          )}
         </motion.section>
 
       </div>
