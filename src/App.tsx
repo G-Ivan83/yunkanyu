@@ -103,39 +103,11 @@ export default function App() {
             "A high-quality 3D interior design render of a study or tea room. Traditional Chinese classical style, Zen atmosphere, bamboo elements, artistic shadows, photorealistic."
           ];
 
-      const imagePromises = promptsToUse.slice(0, 3).map(imgPrompt => 
-        ai.models.generateContent({
-          model: 'gemini-2.5-flash-image',
-          contents: {
-            parts: [
-              { inlineData: { data: base64Data, mimeType: imageFile.type } },
-              { text: "Based strictly on the layout of the provided floor plan image: " + imgPrompt }
-            ]
-          },
-          config: {
-            // @ts-ignore
-            imageConfig: {
-              aspectRatio: "4:3",
-            }
-          }
-        })
-      );
-
-      const imageResults = await Promise.allSettled(imagePromises);
-      const generatedImages: string[] = [];
-
-      imageResults.forEach((res) => {
-        if (res.status === 'fulfilled') {
-          const parts = res.value.candidates?.[0]?.content?.parts || [];
-          for (const part of parts) {
-            if (part.inlineData) {
-              generatedImages.push(`data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}`);
-              break;
-            }
-          }
-        } else {
-          console.error("Image generation failed:", res.reason);
-        }
+      const generatedImages: string[] = promptsToUse.slice(0, 3).map(imgPrompt => {
+        // Use pollinations.ai for free, no-key image generation
+        // We append a random seed to ensure unique images if prompts are similar
+        const seed = Math.floor(Math.random() * 1000000);
+        return `https://image.pollinations.ai/prompt/${encodeURIComponent(imgPrompt)}?width=800&height=600&nologo=true&seed=${seed}`;
       });
 
       setAnalysis({
