@@ -20,7 +20,7 @@ interface AnalysisResult {
 
 export default function App() {
   const [appState, setAppState] = useState<AppState>('landing');
-  const [apiKey, setApiKey] = useState(process.env.GEMINI_API_KEY || '');
+  const [apiKey, setApiKey] = useState(import.meta.env.VITE_GEMINI_API_KEY || '');
   const [activationCode, setActivationCode] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -52,7 +52,7 @@ export default function App() {
     setError(null);
 
     try {
-      const keyToUse = apiKey || process.env.GEMINI_API_KEY;
+      const keyToUse = apiKey || import.meta.env.VITE_GEMINI_API_KEY;
       if (!keyToUse) {
         throw new Error("请赐予灵钥（API Key或激活码）");
       }
