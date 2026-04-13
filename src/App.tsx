@@ -1,12 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Settings, ImagePlus, Key, Compass, Sparkles, Moon, Sun } from 'lucide-react';
+import { Settings, ImagePlus, Key, Compass, Sparkles, Moon, Sun, BookOpen } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { GoogleGenAI } from '@google/genai';
 import { cn } from './lib/utils';
 
 // --- Types ---
-type AppState = 'landing' | 'upload' | 'analyzing' | 'results';
+type AppState = 'landing' | 'upload' | 'analyzing' | 'results' | 'report';
 
 interface AnalysisResult {
   fengShui: string;
@@ -182,6 +182,13 @@ export default function App() {
         </div>
         <div className="flex items-center gap-4">
           <button 
+            onClick={() => setAppState('report')}
+            className="p-3 rounded-full hover:bg-primary/10 transition-all text-ink/60 hover:text-ink duration-700"
+            title="课程作业介绍"
+          >
+            <BookOpen className="w-5 h-5" strokeWidth={1} />
+          </button>
+          <button 
             onClick={() => setIsDarkMode(!isDarkMode)}
             className="p-3 rounded-full hover:bg-primary/10 transition-all text-ink/60 hover:text-ink duration-700"
           >
@@ -226,6 +233,9 @@ export default function App() {
                 setAnalysis(null);
               }}
             />
+          )}
+          {appState === 'report' && (
+            <ReportView key="report" onBack={() => setAppState('landing')} />
           )}
         </AnimatePresence>
       </main>
@@ -671,6 +681,112 @@ const SettingsModal: React.FC<{
           确认封存
         </button>
       </motion.div>
+    </motion.div>
+  );
+};
+
+const ReportView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 40 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -40 }}
+      transition={{ duration: 1.5, ease: [0.25, 0.1, 0.25, 1] }}
+      className="w-full max-w-4xl flex flex-col pb-32 pt-16 relative z-10"
+    >
+      <div className="flex justify-between items-center mb-20">
+        <button 
+          onClick={onBack}
+          className="text-ink/50 hover:text-ink transition-colors tracking-widest text-sm flex items-center gap-3 font-light"
+        >
+          <div className="w-8 h-[1px] bg-current" />
+          返回首页
+        </button>
+      </div>
+
+      <div className="flex flex-col items-center mb-24">
+        <div className="w-[1px] h-16 bg-gradient-to-b from-transparent to-primary/40 mb-8" />
+        <h1 className="text-3xl md:text-4xl font-serif tracking-[0.4em] text-ink font-light mb-6 text-center">
+          《数字建筑理论与方法》
+        </h1>
+        <h2 className="text-xl text-ink/60 tracking-[0.3em] font-light text-center">
+          课程作业卷宗
+        </h2>
+        <div className="w-[1px] h-16 bg-gradient-to-t from-transparent to-primary/40 mt-8" />
+      </div>
+
+      <div className="space-y-24">
+        <section className="relative">
+          <div className="absolute -left-8 top-2 text-primary/5 font-serif text-8xl pointer-events-none">壹</div>
+          <div className="flex items-center gap-6 mb-10">
+            <div className="flex flex-col items-center gap-2">
+              <span className="font-serif text-primary text-lg">壹</span>
+              <div className="w-[1px] h-8 bg-primary/30" />
+            </div>
+            <h3 className="text-2xl font-serif tracking-[0.3em] text-ink font-light">核心 AI 模型</h3>
+            <div className="flex-1 h-[1px] bg-gradient-to-r from-primary/20 to-transparent" />
+          </div>
+          <div className="pl-14 space-y-6 text-ink/80 font-light tracking-wider leading-loose text-justify">
+            <p>本项目采用了<strong className="font-medium text-ink">多模型协同 (Multi-Model Orchestration)</strong> 的架构，将视觉理解、文本生成与图像生成分离，以达到最佳效果：</p>
+            <ul className="list-disc pl-6 space-y-4">
+              <li>
+                <strong className="font-medium text-ink">多模态大语言模型：Google Gemini (gemini-3-flash-preview)</strong><br/>
+                <span className="opacity-80">利用 Gemini 强大的多模态视觉理解能力，直接读取用户上传的户型图。通过精心设计的 Prompt 工程，要求模型扮演“精通传统风水与人居科学的设计大师”，对户型图进行空间结构分析，并强制输出结构化的 JSON 数据。</span>
+              </li>
+              <li>
+                <strong className="font-medium text-ink">AI 图像生成模型：Pollinations.ai</strong><br/>
+                <span className="opacity-80">接收 Gemini 动态生成的、带有“传统中式、美院水墨风格、高级质感”等关键词的英文 Prompt，将其转化为高质量的 3D 室内设计概念图。</span>
+              </li>
+            </ul>
+          </div>
+        </section>
+
+        <section className="relative">
+          <div className="absolute -left-8 top-2 text-primary/5 font-serif text-8xl pointer-events-none">贰</div>
+          <div className="flex items-center gap-6 mb-10">
+            <div className="flex flex-col items-center gap-2">
+              <span className="font-serif text-primary text-lg">贰</span>
+              <div className="w-[1px] h-8 bg-primary/30" />
+            </div>
+            <h3 className="text-2xl font-serif tracking-[0.3em] text-ink font-light">前端技术栈</h3>
+            <div className="flex-1 h-[1px] bg-gradient-to-r from-primary/20 to-transparent" />
+          </div>
+          <div className="pl-14 space-y-6 text-ink/80 font-light tracking-wider leading-loose text-justify">
+            <p>项目采用现代化的前端技术栈，注重性能、开发体验与交互美感：</p>
+            <ul className="list-disc pl-6 space-y-4">
+              <li><strong className="font-medium text-ink">核心框架：React 18 + TypeScript</strong>。利用 React 的组件化思想构建 UI，TypeScript 提供了严格的类型检查，极大提升了代码的健壮性和可维护性。</li>
+              <li><strong className="font-medium text-ink">样式方案：Tailwind CSS v4</strong>。通过自定义主题变量，构建了一套极具东方美学的色彩体系（如宣纸白、深墨色、枯木褐、竹青色），并实现了无缝的日间/夜间模式切换。</li>
+              <li><strong className="font-medium text-ink">动画引擎：Framer Motion</strong>。实现了页面切换的平滑过渡，以及复杂的微交互，如背景中缓慢呼吸的“水墨晕染”效果、图片的错落式加载，极大增强了“高级感”。</li>
+            </ul>
+          </div>
+        </section>
+
+        <section className="relative">
+          <div className="absolute -left-8 top-2 text-primary/5 font-serif text-8xl pointer-events-none">叁</div>
+          <div className="flex items-center gap-6 mb-10">
+            <div className="flex flex-col items-center gap-2">
+              <span className="font-serif text-primary text-lg">叁</span>
+              <div className="w-[1px] h-8 bg-primary/30" />
+            </div>
+            <h3 className="text-2xl font-serif tracking-[0.3em] text-ink font-light">核心技术与设计难点</h3>
+            <div className="flex-1 h-[1px] bg-gradient-to-r from-primary/20 to-transparent" />
+          </div>
+          <div className="pl-14 space-y-8 text-ink/80 font-light tracking-wider leading-loose text-justify">
+            <div>
+              <h4 className="text-lg text-ink mb-2 font-medium">1. 解决并发请求导致的“图像生成失败”问题</h4>
+              <p className="opacity-80">最初在请求生成 3 张意境图时，触发了接口的并发限制。开发了 <code>StaggeredImageGallery</code>（错落式画廊）组件，改为顺序加载机制，监听图片的 <code>onLoad</code> 事件，彻底解决了图片生成失败的问题。</p>
+            </div>
+            <div>
+              <h4 className="text-lg text-ink mb-2 font-medium">2. AI 输出的结构化控制</h4>
+              <p className="opacity-80">大语言模型默认输出自由文本，很难直接渲染到前端。在调用 Gemini API 时，启用了 SDK 的 <code>responseMimeType: "application/json"</code> 配置项，强制模型在底层以 JSON 格式返回数据，保证了数据流的绝对稳定。</p>
+            </div>
+            <div>
+              <h4 className="text-lg text-ink mb-2 font-medium">3. 传统东方美学的现代化 UI 表达</h4>
+              <p className="opacity-80">摒弃了传统的卡片式阴影和粗边框，大量使用极细的渐变线条和页面留白。引入了 <code>writing-mode: vertical-rl</code> 实现汉字的竖排显示。利用 SVG 滤镜在 CSS 中生成了极具质感的“宣纸噪点”纹理，用纯代码模拟出了水墨在纸上晕染的物理视觉效果。</p>
+            </div>
+          </div>
+        </section>
+      </div>
     </motion.div>
   );
 };
