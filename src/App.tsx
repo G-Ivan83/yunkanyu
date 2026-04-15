@@ -8,6 +8,7 @@ import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import * as mammoth from 'mammoth';
 import { cn } from './lib/utils';
 import { ARCHITECTURE_KNOWLEDGE } from './knowledge';
+import defaultKbData from './data/default_kb.json';
 
 // Polyfill for Promise.withResolvers (required by newer pdfjs-dist)
 if (typeof (Promise as any).withResolvers === 'undefined') {
@@ -120,14 +121,22 @@ export default function App() {
   const [kbChunks, setKbChunks] = useState<KBChunk[]>(() => {
     try {
       const saved = localStorage.getItem('kbChunks');
-      return saved ? JSON.parse(saved) : [];
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && parsed.length > 0) return parsed;
+      }
+      return defaultKbData as KBChunk[];
     } catch {
-      return [];
+      return defaultKbData as KBChunk[];
     }
   });
 
   useEffect(() => {
-    localStorage.setItem('kbChunks', JSON.stringify(kbChunks));
+    try {
+      localStorage.setItem('kbChunks', JSON.stringify(kbChunks));
+    } catch (e) {
+      console.warn("Failed to save kbChunks to localStorage (might be too large)", e);
+    }
   }, [kbChunks]);
 
   useEffect(() => {
@@ -909,20 +918,37 @@ const KnowledgeBaseModal: React.FC<{
       const newChunks: KBChunk[] = [];
 
       for (let i = 0; i < chunks.length; i++) {
-        setProgressText(`正在生成向量... (${i + 1}/${chunks.length})`);
-        const response = await ai.models.embedContent({
-          model: 'gemini-embedding-2-preview',
-          contents: chunks[i],
-        });
-        if (response.embeddings && response.embeddings[0].values) {
-          newChunks.push({
-            id: Math.random().toString(36).substring(7),
-            source: file.name,
-            text: chunks[i],
-            embedding: response.embeddings[0].values
-          });
+        let success = false;
+        let retries = 0;
+        while (!success && retries < 5) {
+          try {
+            setProgressText(`正在生成向量... (${i + 1}/${chunks.length})${retries > 0 ? ` [重试 ${retries}/5]` : ''}`);
+            const response = await ai.models.embedContent({
+              model: 'gemini-embedding-2-preview',
+              contents: chunks[i],
+            });
+            if (response.embeddings && response.embeddings[0].values) {
+              newChunks.push({
+                id: Math.random().toString(36).substring(7),
+                source: file.name,
+                text: chunks[i],
+                embedding: response.embeddings[0].values
+              });
+            }
+            success = true;
+            await new Promise(r => setTimeout(r, 500)); // Rate limit protection
+          } catch (e: any) {
+            if (e.status === 429 || (e.message && e.message.includes('429'))) {
+              retries++;
+              await new Promise(r => setTimeout(r, 2000 * retries));
+            } else {
+              throw e;
+            }
+          }
         }
-        await new Promise(r => setTimeout(r, 300)); // Rate limit protection
+        if (!success) {
+          throw new Error("API 频率限制或网络错误，部分向量生成失败");
+        }
       }
 
       setKbChunks(prev => [...prev, ...newChunks]);
@@ -945,6 +971,16 @@ const KnowledgeBaseModal: React.FC<{
     disabled: isProcessing
   } as any);
 
+  const exportKb = () => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(kbChunks, null, 2));
+    const downloadAnchorNode = document.createElement('a');
+    downloadAnchorNode.setAttribute("href", dataStr);
+    downloadAnchorNode.setAttribute("download", "default_kb.json");
+    document.body.appendChild(downloadAnchorNode);
+    downloadAnchorNode.click();
+    downloadAnchorNode.remove();
+  };
+
   return (
     <motion.div 
       initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
@@ -958,10 +994,20 @@ const KnowledgeBaseModal: React.FC<{
       >
         <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary/50 to-transparent" />
         
-        <h3 className="text-2xl font-serif tracking-[0.3em] text-ink mb-10 text-center font-light flex items-center justify-center gap-4">
-          <Database className="w-6 h-6" strokeWidth={1} />
-          典籍库 (RAG)
-        </h3>
+        <div className="flex justify-between items-center mb-10">
+          <h3 className="text-2xl font-serif tracking-[0.3em] text-ink font-light flex items-center gap-4">
+            <Database className="w-6 h-6" strokeWidth={1} />
+            典籍库 (RAG)
+          </h3>
+          {kbChunks.length > 0 && (
+            <button 
+              onClick={exportKb}
+              className="px-4 py-2 bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors text-sm tracking-widest"
+            >
+              导出为预计算 JSON
+            </button>
+          )}
+        </div>
         
         <div className="space-y-8">
           <div 
