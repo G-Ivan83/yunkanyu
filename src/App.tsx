@@ -4,10 +4,23 @@ import { Settings, ImagePlus, Key, Compass, Sparkles, Moon, Sun, BookOpen, Datab
 import { useDropzone } from 'react-dropzone';
 import { GoogleGenAI } from '@google/genai';
 import * as pdfjsLib from 'pdfjs-dist';
+import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
 import { cn } from './lib/utils';
 import { ARCHITECTURE_KNOWLEDGE } from './knowledge';
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+// Polyfill for Promise.withResolvers (required by newer pdfjs-dist)
+if (typeof (Promise as any).withResolvers === 'undefined') {
+  (Promise as any).withResolvers = function () {
+    let resolve, reject;
+    const promise = new Promise((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  };
+}
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 
 // --- Types ---
 type AppState = 'landing' | 'upload' | 'analyzing' | 'results' | 'report';
@@ -860,7 +873,10 @@ const KnowledgeBaseModal: React.FC<{
     try {
       setProgressText('正在解析 PDF 文本...');
       const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      const pdf = await pdfjsLib.getDocument({ 
+        data: new Uint8Array(arrayBuffer),
+        standardFontDataUrl: `https://unpkg.com/pdfjs-dist@5.6.205/standard_fonts/`,
+      }).promise;
       let fullText = '';
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i);
@@ -895,9 +911,9 @@ const KnowledgeBaseModal: React.FC<{
 
       setKbChunks(prev => [...prev, ...newChunks]);
       setProgressText('');
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
-      alert("处理 PDF 失败，请查看控制台。");
+      alert("处理 PDF 失败: " + (err.message || err));
     } finally {
       setIsProcessing(false);
     }
