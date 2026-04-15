@@ -178,7 +178,7 @@ export default function App() {
           const newChunks: KBChunk[] = [];
           for (const text of chunks) {
             const response = await ai.models.embedContent({
-              model: 'text-embedding-004',
+              model: 'gemini-embedding-2-preview',
               contents: text,
             });
             if (response.embeddings && response.embeddings[0].values) {
@@ -203,7 +203,7 @@ export default function App() {
         try {
           const query = "传统风水学、环境行为学、室内设计建议、空间布局、材质色彩";
           const queryResponse = await ai.models.embedContent({
-            model: 'text-embedding-004',
+            model: 'gemini-embedding-2-preview',
             contents: query,
           });
           const queryEmbedding = queryResponse.embeddings?.[0]?.values;
@@ -895,7 +895,7 @@ const KnowledgeBaseModal: React.FC<{
       for (let i = 0; i < chunks.length; i++) {
         setProgressText(`正在生成向量... (${i + 1}/${chunks.length})`);
         const response = await ai.models.embedContent({
-          model: 'text-embedding-004',
+          model: 'gemini-embedding-2-preview',
           contents: chunks[i],
         });
         if (response.embeddings && response.embeddings[0].values) {
