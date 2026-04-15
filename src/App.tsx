@@ -1,9 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Settings, ImagePlus, Key, Compass, Sparkles, Moon, Sun, BookOpen } from 'lucide-react';
+import { Settings, ImagePlus, Key, Compass, Sparkles, Moon, Sun, BookOpen, Database, Trash2, FileText, Loader2 } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { GoogleGenAI } from '@google/genai';
+import * as pdfjsLib from 'pdfjs-dist';
 import { cn } from './lib/utils';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
 
 // --- Types ---
 type AppState = 'landing' | 'upload' | 'analyzing' | 'results' | 'report';
@@ -14,6 +17,33 @@ interface AnalysisResult {
   suggestions: string;
   imagePrompts?: string[];
   generatedImages: string[];
+}
+
+interface KBChunk {
+  id: string;
+  source: string;
+  text: string;
+  embedding: number[];
+}
+
+function chunkText(text: string, chunkSize = 800, overlap = 150) {
+  const chunks = [];
+  for (let i = 0; i < text.length; i += chunkSize - overlap) {
+    chunks.push(text.slice(i, i + chunkSize));
+  }
+  return chunks;
+}
+
+function cosineSimilarity(a: number[], b: number[]) {
+  let dotProduct = 0;
+  let normA = 0;
+  let normB = 0;
+  for (let i = 0; i < a.length; i++) {
+    dotProduct += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
 // --- Components ---
@@ -70,6 +100,19 @@ export default function App() {
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(false);
+  const [showKB, setShowKB] = useState(false);
+  const [kbChunks, setKbChunks] = useState<KBChunk[]>(() => {
+    try {
+      const saved = localStorage.getItem('kbChunks');
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  useEffect(() => {
+    localStorage.setItem('kbChunks', JSON.stringify(kbChunks));
+  }, [kbChunks]);
 
   useEffect(() => {
     if (isDarkMode) {
@@ -111,8 +154,42 @@ export default function App() {
       const ai = new GoogleGenAI({ apiKey: keyToUse });
       const base64Data = imagePreview.split(',')[1];
       
+      let augmentedContext = "";
+      if (kbChunks.length > 0) {
+        try {
+          const query = "传统风水学、环境行为学、室内设计建议、空间布局、材质色彩";
+          const queryResponse = await ai.models.embedContent({
+            model: 'text-embedding-004',
+            contents: query,
+          });
+          const queryEmbedding = queryResponse.embeddings?.[0]?.values;
+
+          if (queryEmbedding) {
+            const similarities = kbChunks.map(chunk => ({
+              ...chunk,
+              similarity: cosineSimilarity(queryEmbedding, chunk.embedding)
+            }));
+
+            similarities.sort((a, b) => b.similarity - a.similarity);
+            const topChunks = similarities.slice(0, 3);
+
+            augmentedContext = `
+            【知识库检索资料 (RAG)】：
+            以下是你需要重点参考的学术背景资料（来自用户上传的文献）：
+            ${topChunks.map((c, i) => `资料 ${i+1} (来源: ${c.source}):\n${c.text}`).join('\n\n')}
+            
+            请在分析时，务必深度借鉴和融合上述资料中的理论和观点，让你的分析更具学术性和专业深度。
+            `;
+          }
+        } catch (e) {
+          console.error("RAG Retrieval failed", e);
+        }
+      }
+
       const prompt = `
       作为一位精通传统风水学、环境行为学和人居科学的室内设计大师。
+      ${augmentedContext}
+      
       请分析这张户型图，并提供以下格式的JSON输出（不要包含markdown代码块标记，直接输出纯JSON）：
       {
         "fengShui": "从传统风水学角度的分析（如气口、动静分区、五行方位等），语言要带有古典韵味。",
@@ -182,6 +259,13 @@ export default function App() {
         </div>
         <div className="flex items-center gap-4">
           <button 
+            onClick={() => setShowKB(true)}
+            className="p-3 rounded-full hover:bg-primary/10 transition-all text-ink/60 hover:text-ink duration-700"
+            title="典籍库 (RAG)"
+          >
+            <Database className="w-5 h-5" strokeWidth={1} />
+          </button>
+          <button 
             onClick={() => setAppState('report')}
             className="p-3 rounded-full hover:bg-primary/10 transition-all text-ink/60 hover:text-ink duration-700"
             title="课程作业介绍"
@@ -249,6 +333,14 @@ export default function App() {
             activationCode={activationCode}
             setActivationCode={setActivationCode}
             onClose={() => setShowSettings(false)}
+          />
+        )}
+        {showKB && (
+          <KnowledgeBaseModal 
+            apiKey={apiKey}
+            kbChunks={kbChunks}
+            setKbChunks={setKbChunks}
+            onClose={() => setShowKB(false)}
           />
         )}
       </AnimatePresence>
@@ -685,6 +777,163 @@ const SettingsModal: React.FC<{
   );
 };
 
+const KnowledgeBaseModal: React.FC<{
+  apiKey: string;
+  kbChunks: KBChunk[];
+  setKbChunks: React.Dispatch<React.SetStateAction<KBChunk[]>>;
+  onClose: () => void;
+}> = ({ apiKey, kbChunks, setKbChunks, onClose }) => {
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [progressText, setProgressText] = useState('');
+
+  const uniqueSources = Array.from(new Set(kbChunks.map(c => c.source)));
+
+  const onDrop = async (acceptedFiles: File[]) => {
+    if (acceptedFiles.length === 0) return;
+    const file = acceptedFiles[0];
+    
+    const keyToUse = apiKey || import.meta.env.VITE_GEMINI_API_KEY;
+    if (!keyToUse) {
+      alert("请先在设置中配置 Gemini API Key");
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      setProgressText('正在解析 PDF 文本...');
+      const arrayBuffer = await file.arrayBuffer();
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      let fullText = '';
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i);
+        const content = await page.getTextContent();
+        const pageText = content.items.map((item: any) => item.str).join(' ');
+        fullText += pageText + '\n';
+      }
+
+      setProgressText('正在进行文本分块...');
+      const chunks = chunkText(fullText, 800, 150);
+
+      setProgressText('正在生成向量 (Embeddings)...');
+      const ai = new GoogleGenAI({ apiKey: keyToUse });
+      const newChunks: KBChunk[] = [];
+
+      for (let i = 0; i < chunks.length; i++) {
+        setProgressText(`正在生成向量... (${i + 1}/${chunks.length})`);
+        const response = await ai.models.embedContent({
+          model: 'text-embedding-004',
+          contents: chunks[i],
+        });
+        if (response.embeddings && response.embeddings[0].values) {
+          newChunks.push({
+            id: Math.random().toString(36).substring(7),
+            source: file.name,
+            text: chunks[i],
+            embedding: response.embeddings[0].values
+          });
+        }
+        await new Promise(r => setTimeout(r, 300)); // Rate limit protection
+      }
+
+      setKbChunks(prev => [...prev, ...newChunks]);
+      setProgressText('');
+    } catch (err) {
+      console.error(err);
+      alert("处理 PDF 失败，请查看控制台。");
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
+    onDrop,
+    accept: { 'application/pdf': ['.pdf'] },
+    disabled: isProcessing
+  } as any);
+
+  return (
+    <motion.div 
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      className="fixed inset-0 bg-paper/90 backdrop-blur-md z-50 flex items-center justify-center p-4"
+      onClick={onClose}
+    >
+      <motion.div 
+        initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }}
+        className="bg-surface border border-primary/20 p-10 w-full max-w-2xl shadow-2xl relative max-h-[80vh] overflow-y-auto custom-scrollbar"
+        onClick={e => e.stopPropagation()}
+      >
+        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary/50 to-transparent" />
+        
+        <h3 className="text-2xl font-serif tracking-[0.3em] text-ink mb-10 text-center font-light flex items-center justify-center gap-4">
+          <Database className="w-6 h-6" strokeWidth={1} />
+          典籍库 (RAG)
+        </h3>
+        
+        <div className="space-y-8">
+          <div 
+            {...getRootProps()} 
+            className={cn(
+              "w-full border border-dashed border-primary/30 p-8 flex flex-col items-center justify-center cursor-pointer transition-colors",
+              isDragActive ? "bg-primary/10" : "hover:bg-primary/5",
+              isProcessing ? "opacity-50 cursor-not-allowed" : ""
+            )}
+          >
+            <input {...getInputProps()} />
+            {isProcessing ? (
+              <div className="flex flex-col items-center gap-4 text-primary">
+                <Loader2 className="w-8 h-8 animate-spin" strokeWidth={1} />
+                <p className="tracking-widest text-sm font-light">{progressText}</p>
+              </div>
+            ) : (
+              <div className="flex flex-col items-center gap-4 text-ink/60">
+                <FileText className="w-8 h-8" strokeWidth={1} />
+                <p className="tracking-widest text-sm font-light">点击或拖拽上传 PDF 典籍</p>
+              </div>
+            )}
+          </div>
+
+          <div>
+            <div className="flex justify-between items-end mb-4">
+              <h4 className="text-sm text-ink/60 tracking-widest font-light">已收录典籍 ({uniqueSources.length})</h4>
+              {kbChunks.length > 0 && (
+                <button 
+                  onClick={() => setKbChunks([])}
+                  className="text-xs text-primary/60 hover:text-primary flex items-center gap-1 tracking-widest"
+                >
+                  <Trash2 className="w-3 h-3" /> 清空
+                </button>
+              )}
+            </div>
+            
+            <div className="space-y-2">
+              {uniqueSources.length === 0 ? (
+                <p className="text-xs text-ink/30 tracking-widest font-light italic">暂无典籍，推演将仅依赖模型基础认知。</p>
+              ) : (
+                uniqueSources.map((source, idx) => (
+                  <div key={idx} className="flex items-center gap-3 p-3 bg-paper/50 border border-primary/10 text-sm text-ink/80 font-light tracking-wider">
+                    <FileText className="w-4 h-4 text-primary/60" strokeWidth={1} />
+                    {source}
+                    <span className="ml-auto text-xs text-ink/40">
+                      {kbChunks.filter(c => c.source === source).length} 卷 (Chunks)
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+
+        <button 
+          onClick={onClose}
+          className="w-full mt-12 py-4 bg-ink text-paper tracking-[0.4em] text-sm hover:bg-ink/90 transition-colors font-light"
+        >
+          确认封存
+        </button>
+      </motion.div>
+    </motion.div>
+  );
+};
+
 const ReportView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   return (
     <motion.div 
@@ -723,19 +972,19 @@ const ReportView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
               <span className="font-serif text-primary text-lg">壹</span>
               <div className="w-[1px] h-8 bg-primary/30" />
             </div>
-            <h3 className="text-2xl font-serif tracking-[0.3em] text-ink font-light">核心 AI 模型</h3>
+            <h3 className="text-2xl font-serif tracking-[0.3em] text-ink font-light">检索增强生成 (RAG) 架构</h3>
             <div className="flex-1 h-[1px] bg-gradient-to-r from-primary/20 to-transparent" />
           </div>
           <div className="pl-14 space-y-6 text-ink/80 font-light tracking-wider leading-loose text-justify">
-            <p>本项目采用了<strong className="font-medium text-ink">多模型协同 (Multi-Model Orchestration)</strong> 的架构，将视觉理解、文本生成与图像生成分离，以达到最佳效果：</p>
+            <p>为了让 AI 的分析更加严谨并具备学术深度，本项目突破了单纯的 Prompt 限制，引入了 <strong className="font-medium text-ink">检索增强生成 (Retrieval-Augmented Generation, RAG)</strong> 技术。</p>
             <ul className="list-disc pl-6 space-y-4">
               <li>
-                <strong className="font-medium text-ink">多模态大语言模型：Google Gemini (gemini-3-flash-preview)</strong><br/>
-                <span className="opacity-80">利用 Gemini 强大的多模态视觉理解能力，直接读取用户上传的户型图。通过精心设计的 Prompt 工程，要求模型扮演“精通传统风水与人居科学的设计大师”，对户型图进行空间结构分析，并强制输出结构化的 JSON 数据。</span>
+                <strong className="font-medium text-ink">本地知识库构建</strong><br/>
+                <span className="opacity-80">用户可在“典籍库”中上传专业的 PDF 文献（如建筑学期刊、风水学专著）。前端利用 <code>pdf.js</code> 解析文本，进行分块 (Chunking) 后，调用 Gemini <code>text-embedding-004</code> 模型生成高维向量 (Embeddings) 并持久化存储。</span>
               </li>
               <li>
-                <strong className="font-medium text-ink">AI 图像生成模型：Pollinations.ai</strong><br/>
-                <span className="opacity-80">接收 Gemini 动态生成的、带有“传统中式、美院水墨风格、高级质感”等关键词的英文 Prompt，将其转化为高质量的 3D 室内设计概念图。</span>
+                <strong className="font-medium text-ink">语义检索与上下文注入</strong><br/>
+                <span className="opacity-80">在分析户型图时，系统会将查询意图向量化，通过余弦相似度 (Cosine Similarity) 检索出最相关的 Top-K 文献片段。这些片段作为上下文注入到 Prompt 中，指导大模型生成具备理论支撑的设计建议，有效缓解了 AI 的“幻觉”问题。</span>
               </li>
             </ul>
           </div>
@@ -748,15 +997,20 @@ const ReportView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
               <span className="font-serif text-primary text-lg">贰</span>
               <div className="w-[1px] h-8 bg-primary/30" />
             </div>
-            <h3 className="text-2xl font-serif tracking-[0.3em] text-ink font-light">前端技术栈</h3>
+            <h3 className="text-2xl font-serif tracking-[0.3em] text-ink font-light">核心 AI 模型</h3>
             <div className="flex-1 h-[1px] bg-gradient-to-r from-primary/20 to-transparent" />
           </div>
           <div className="pl-14 space-y-6 text-ink/80 font-light tracking-wider leading-loose text-justify">
-            <p>项目采用现代化的前端技术栈，注重性能、开发体验与交互美感：</p>
+            <p>本项目采用了<strong className="font-medium text-ink">多模型协同 (Multi-Model Orchestration)</strong> 的架构，将视觉理解、文本生成与图像生成分离，以达到最佳效果：</p>
             <ul className="list-disc pl-6 space-y-4">
-              <li><strong className="font-medium text-ink">核心框架：React 18 + TypeScript</strong>。利用 React 的组件化思想构建 UI，TypeScript 提供了严格的类型检查，极大提升了代码的健壮性和可维护性。</li>
-              <li><strong className="font-medium text-ink">样式方案：Tailwind CSS v4</strong>。通过自定义主题变量，构建了一套极具东方美学的色彩体系（如宣纸白、深墨色、枯木褐、竹青色），并实现了无缝的日间/夜间模式切换。</li>
-              <li><strong className="font-medium text-ink">动画引擎：Framer Motion</strong>。实现了页面切换的平滑过渡，以及复杂的微交互，如背景中缓慢呼吸的“水墨晕染”效果、图片的错落式加载，极大增强了“高级感”。</li>
+              <li>
+                <strong className="font-medium text-ink">多模态大语言模型：Google Gemini (gemini-3-flash-preview)</strong><br/>
+                <span className="opacity-80">利用 Gemini 强大的多模态视觉理解能力，直接读取用户上传的户型图，并结合 RAG 检索到的知识，输出结构化的 JSON 数据。</span>
+              </li>
+              <li>
+                <strong className="font-medium text-ink">AI 图像生成模型：Pollinations.ai</strong><br/>
+                <span className="opacity-80">接收 Gemini 动态生成的、带有“传统中式、美院水墨风格、高级质感”等关键词的英文 Prompt，将其转化为高质量的 3D 室内设计概念图。</span>
+              </li>
             </ul>
           </div>
         </section>
@@ -768,22 +1022,16 @@ const ReportView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
               <span className="font-serif text-primary text-lg">叁</span>
               <div className="w-[1px] h-8 bg-primary/30" />
             </div>
-            <h3 className="text-2xl font-serif tracking-[0.3em] text-ink font-light">核心技术与设计难点</h3>
+            <h3 className="text-2xl font-serif tracking-[0.3em] text-ink font-light">前端技术栈与美学表达</h3>
             <div className="flex-1 h-[1px] bg-gradient-to-r from-primary/20 to-transparent" />
           </div>
-          <div className="pl-14 space-y-8 text-ink/80 font-light tracking-wider leading-loose text-justify">
-            <div>
-              <h4 className="text-lg text-ink mb-2 font-medium">1. 解决并发请求导致的“图像生成失败”问题</h4>
-              <p className="opacity-80">最初在请求生成 3 张意境图时，触发了接口的并发限制。开发了 <code>StaggeredImageGallery</code>（错落式画廊）组件，改为顺序加载机制，监听图片的 <code>onLoad</code> 事件，彻底解决了图片生成失败的问题。</p>
-            </div>
-            <div>
-              <h4 className="text-lg text-ink mb-2 font-medium">2. AI 输出的结构化控制</h4>
-              <p className="opacity-80">大语言模型默认输出自由文本，很难直接渲染到前端。在调用 Gemini API 时，启用了 SDK 的 <code>responseMimeType: "application/json"</code> 配置项，强制模型在底层以 JSON 格式返回数据，保证了数据流的绝对稳定。</p>
-            </div>
-            <div>
-              <h4 className="text-lg text-ink mb-2 font-medium">3. 传统东方美学的现代化 UI 表达</h4>
-              <p className="opacity-80">摒弃了传统的卡片式阴影和粗边框，大量使用极细的渐变线条和页面留白。引入了 <code>writing-mode: vertical-rl</code> 实现汉字的竖排显示。利用 SVG 滤镜在 CSS 中生成了极具质感的“宣纸噪点”纹理，用纯代码模拟出了水墨在纸上晕染的物理视觉效果。</p>
-            </div>
+          <div className="pl-14 space-y-6 text-ink/80 font-light tracking-wider leading-loose text-justify">
+            <p>项目采用现代化的前端技术栈，注重性能、开发体验与交互美感：</p>
+            <ul className="list-disc pl-6 space-y-4">
+              <li><strong className="font-medium text-ink">核心框架：React 18 + TypeScript + Vite</strong>。利用 React 的组件化思想构建 UI，TypeScript 提供了严格的类型检查。</li>
+              <li><strong className="font-medium text-ink">传统东方美学的现代化 UI 表达</strong>。摒弃了传统的卡片式阴影和粗边框，大量使用极细的渐变线条和页面留白。引入了 <code>writing-mode: vertical-rl</code> 实现汉字的竖排显示。</li>
+              <li><strong className="font-medium text-ink">质感模拟与动画 (Framer Motion)</strong>。利用 SVG 滤镜在 CSS 中生成了极具质感的“宣纸噪点”纹理，配合模糊和正片叠底，用纯代码模拟出了水墨在纸上晕染的物理视觉效果。</li>
+            </ul>
           </div>
         </section>
       </div>
