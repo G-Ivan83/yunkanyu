@@ -1,12 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Settings, ImagePlus, Key, Compass, Sparkles, Moon, Sun, BookOpen, Database, Trash2, FileText, Loader2 } from 'lucide-react';
+import { Settings, ImagePlus, Key, Compass, Sparkles, Moon, Sun, BookOpen } from 'lucide-react';
 import { useDropzone } from 'react-dropzone';
 import { GoogleGenAI } from '@google/genai';
-import * as pdfjsLib from 'pdfjs-dist';
 import { cn } from './lib/utils';
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = `https://unpkg.com/pdfjs-dist@${pdfjsLib.version}/build/pdf.worker.min.mjs`;
+import { ARCHITECTURE_KNOWLEDGE } from './knowledge';
 
 // --- Types ---
 type AppState = 'landing' | 'upload' | 'analyzing' | 'results' | 'report';
@@ -100,7 +98,6 @@ export default function App() {
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isDarkMode, setIsDarkMode] = useState(false);
-  const [showKB, setShowKB] = useState(false);
   const [kbChunks, setKbChunks] = useState<KBChunk[]>(() => {
     try {
       const saved = localStorage.getItem('kbChunks');
@@ -154,8 +151,36 @@ export default function App() {
       const ai = new GoogleGenAI({ apiKey: keyToUse });
       const base64Data = imagePreview.split(',')[1];
       
+      let currentKbChunks = kbChunks;
+
+      // 如果知识库为空，则在首次推演时自动向量化内置典籍
+      if (currentKbChunks.length === 0) {
+        try {
+          const chunks = chunkText(ARCHITECTURE_KNOWLEDGE, 400, 50);
+          const newChunks: KBChunk[] = [];
+          for (const text of chunks) {
+            const response = await ai.models.embedContent({
+              model: 'text-embedding-004',
+              contents: text,
+            });
+            if (response.embeddings && response.embeddings[0].values) {
+              newChunks.push({
+                id: Math.random().toString(36).substring(7),
+                source: '《人居境象·内置典籍》',
+                text: text,
+                embedding: response.embeddings[0].values
+              });
+            }
+          }
+          setKbChunks(newChunks);
+          currentKbChunks = newChunks;
+        } catch (e) {
+          console.error("Failed to initialize knowledge base", e);
+        }
+      }
+      
       let augmentedContext = "";
-      if (kbChunks.length > 0) {
+      if (currentKbChunks.length > 0) {
         try {
           const query = "传统风水学、环境行为学、室内设计建议、空间布局、材质色彩";
           const queryResponse = await ai.models.embedContent({
@@ -165,7 +190,7 @@ export default function App() {
           const queryEmbedding = queryResponse.embeddings?.[0]?.values;
 
           if (queryEmbedding) {
-            const similarities = kbChunks.map(chunk => ({
+            const similarities = currentKbChunks.map(chunk => ({
               ...chunk,
               similarity: cosineSimilarity(queryEmbedding, chunk.embedding)
             }));
@@ -175,7 +200,7 @@ export default function App() {
 
             augmentedContext = `
             【知识库检索资料 (RAG)】：
-            以下是你需要重点参考的学术背景资料（来自用户上传的文献）：
+            以下是你需要重点参考的学术背景资料（来自开发者预置的建筑学典籍）：
             ${topChunks.map((c, i) => `资料 ${i+1} (来源: ${c.source}):\n${c.text}`).join('\n\n')}
             
             请在分析时，务必深度借鉴和融合上述资料中的理论和观点，让你的分析更具学术性和专业深度。
@@ -259,13 +284,6 @@ export default function App() {
         </div>
         <div className="flex items-center gap-4">
           <button 
-            onClick={() => setShowKB(true)}
-            className="p-3 rounded-full hover:bg-primary/10 transition-all text-ink/60 hover:text-ink duration-700"
-            title="典籍库 (RAG)"
-          >
-            <Database className="w-5 h-5" strokeWidth={1} />
-          </button>
-          <button 
             onClick={() => setAppState('report')}
             className="p-3 rounded-full hover:bg-primary/10 transition-all text-ink/60 hover:text-ink duration-700"
             title="课程作业介绍"
@@ -333,14 +351,6 @@ export default function App() {
             activationCode={activationCode}
             setActivationCode={setActivationCode}
             onClose={() => setShowSettings(false)}
-          />
-        )}
-        {showKB && (
-          <KnowledgeBaseModal 
-            apiKey={apiKey}
-            kbChunks={kbChunks}
-            setKbChunks={setKbChunks}
-            onClose={() => setShowKB(false)}
           />
         )}
       </AnimatePresence>
@@ -777,163 +787,6 @@ const SettingsModal: React.FC<{
   );
 };
 
-const KnowledgeBaseModal: React.FC<{
-  apiKey: string;
-  kbChunks: KBChunk[];
-  setKbChunks: React.Dispatch<React.SetStateAction<KBChunk[]>>;
-  onClose: () => void;
-}> = ({ apiKey, kbChunks, setKbChunks, onClose }) => {
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [progressText, setProgressText] = useState('');
-
-  const uniqueSources = Array.from(new Set(kbChunks.map(c => c.source)));
-
-  const onDrop = async (acceptedFiles: File[]) => {
-    if (acceptedFiles.length === 0) return;
-    const file = acceptedFiles[0];
-    
-    const keyToUse = apiKey || import.meta.env.VITE_GEMINI_API_KEY;
-    if (!keyToUse) {
-      alert("请先在设置中配置 Gemini API Key");
-      return;
-    }
-
-    setIsProcessing(true);
-    try {
-      setProgressText('正在解析 PDF 文本...');
-      const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-      let fullText = '';
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        const pageText = content.items.map((item: any) => item.str).join(' ');
-        fullText += pageText + '\n';
-      }
-
-      setProgressText('正在进行文本分块...');
-      const chunks = chunkText(fullText, 800, 150);
-
-      setProgressText('正在生成向量 (Embeddings)...');
-      const ai = new GoogleGenAI({ apiKey: keyToUse });
-      const newChunks: KBChunk[] = [];
-
-      for (let i = 0; i < chunks.length; i++) {
-        setProgressText(`正在生成向量... (${i + 1}/${chunks.length})`);
-        const response = await ai.models.embedContent({
-          model: 'text-embedding-004',
-          contents: chunks[i],
-        });
-        if (response.embeddings && response.embeddings[0].values) {
-          newChunks.push({
-            id: Math.random().toString(36).substring(7),
-            source: file.name,
-            text: chunks[i],
-            embedding: response.embeddings[0].values
-          });
-        }
-        await new Promise(r => setTimeout(r, 300)); // Rate limit protection
-      }
-
-      setKbChunks(prev => [...prev, ...newChunks]);
-      setProgressText('');
-    } catch (err) {
-      console.error(err);
-      alert("处理 PDF 失败，请查看控制台。");
-    } finally {
-      setIsProcessing(false);
-    }
-  };
-
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
-    onDrop,
-    accept: { 'application/pdf': ['.pdf'] },
-    disabled: isProcessing
-  } as any);
-
-  return (
-    <motion.div 
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 bg-paper/90 backdrop-blur-md z-50 flex items-center justify-center p-4"
-      onClick={onClose}
-    >
-      <motion.div 
-        initial={{ scale: 0.95, opacity: 0, y: 20 }} animate={{ scale: 1, opacity: 1, y: 0 }} exit={{ scale: 0.95, opacity: 0, y: 20 }}
-        className="bg-surface border border-primary/20 p-10 w-full max-w-2xl shadow-2xl relative max-h-[80vh] overflow-y-auto custom-scrollbar"
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary/50 to-transparent" />
-        
-        <h3 className="text-2xl font-serif tracking-[0.3em] text-ink mb-10 text-center font-light flex items-center justify-center gap-4">
-          <Database className="w-6 h-6" strokeWidth={1} />
-          典籍库 (RAG)
-        </h3>
-        
-        <div className="space-y-8">
-          <div 
-            {...getRootProps()} 
-            className={cn(
-              "w-full border border-dashed border-primary/30 p-8 flex flex-col items-center justify-center cursor-pointer transition-colors",
-              isDragActive ? "bg-primary/10" : "hover:bg-primary/5",
-              isProcessing ? "opacity-50 cursor-not-allowed" : ""
-            )}
-          >
-            <input {...getInputProps()} />
-            {isProcessing ? (
-              <div className="flex flex-col items-center gap-4 text-primary">
-                <Loader2 className="w-8 h-8 animate-spin" strokeWidth={1} />
-                <p className="tracking-widest text-sm font-light">{progressText}</p>
-              </div>
-            ) : (
-              <div className="flex flex-col items-center gap-4 text-ink/60">
-                <FileText className="w-8 h-8" strokeWidth={1} />
-                <p className="tracking-widest text-sm font-light">点击或拖拽上传 PDF 典籍</p>
-              </div>
-            )}
-          </div>
-
-          <div>
-            <div className="flex justify-between items-end mb-4">
-              <h4 className="text-sm text-ink/60 tracking-widest font-light">已收录典籍 ({uniqueSources.length})</h4>
-              {kbChunks.length > 0 && (
-                <button 
-                  onClick={() => setKbChunks([])}
-                  className="text-xs text-primary/60 hover:text-primary flex items-center gap-1 tracking-widest"
-                >
-                  <Trash2 className="w-3 h-3" /> 清空
-                </button>
-              )}
-            </div>
-            
-            <div className="space-y-2">
-              {uniqueSources.length === 0 ? (
-                <p className="text-xs text-ink/30 tracking-widest font-light italic">暂无典籍，推演将仅依赖模型基础认知。</p>
-              ) : (
-                uniqueSources.map((source, idx) => (
-                  <div key={idx} className="flex items-center gap-3 p-3 bg-paper/50 border border-primary/10 text-sm text-ink/80 font-light tracking-wider">
-                    <FileText className="w-4 h-4 text-primary/60" strokeWidth={1} />
-                    {source}
-                    <span className="ml-auto text-xs text-ink/40">
-                      {kbChunks.filter(c => c.source === source).length} 卷 (Chunks)
-                    </span>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        </div>
-
-        <button 
-          onClick={onClose}
-          className="w-full mt-12 py-4 bg-ink text-paper tracking-[0.4em] text-sm hover:bg-ink/90 transition-colors font-light"
-        >
-          确认封存
-        </button>
-      </motion.div>
-    </motion.div>
-  );
-};
-
 const ReportView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   return (
     <motion.div 
@@ -979,12 +832,12 @@ const ReportView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
             <p>为了让 AI 的分析更加严谨并具备学术深度，本项目突破了单纯的 Prompt 限制，引入了 <strong className="font-medium text-ink">检索增强生成 (Retrieval-Augmented Generation, RAG)</strong> 技术。</p>
             <ul className="list-disc pl-6 space-y-4">
               <li>
-                <strong className="font-medium text-ink">本地知识库构建</strong><br/>
-                <span className="opacity-80">用户可在“典籍库”中上传专业的 PDF 文献（如建筑学期刊、风水学专著）。前端利用 <code>pdf.js</code> 解析文本，进行分块 (Chunking) 后，调用 Gemini <code>text-embedding-004</code> 模型生成高维向量 (Embeddings) 并持久化存储。</span>
+                <strong className="font-medium text-ink">开发者预置知识库</strong><br/>
+                <span className="opacity-80">系统内置了由开发者精选的专业建筑学与风水学典籍文本。在首次进行户型推演时，前端会自动对这些预置文本进行分块 (Chunking)，并调用 Gemini <code>text-embedding-004</code> 模型生成高维向量 (Embeddings)，将其持久化存储在浏览器的 Local Storage 中。</span>
               </li>
               <li>
                 <strong className="font-medium text-ink">语义检索与上下文注入</strong><br/>
-                <span className="opacity-80">在分析户型图时，系统会将查询意图向量化，通过余弦相似度 (Cosine Similarity) 检索出最相关的 Top-K 文献片段。这些片段作为上下文注入到 Prompt 中，指导大模型生成具备理论支撑的设计建议，有效缓解了 AI 的“幻觉”问题。</span>
+                <span className="opacity-80">在分析户型图时，系统会将查询意图向量化，通过余弦相似度 (Cosine Similarity) 检索出最相关的 Top-K 典籍片段。这些片段作为上下文注入到 Prompt 中，指导大模型生成具备理论支撑的设计建议，有效缓解了 AI 的“幻觉”问题。</span>
               </li>
             </ul>
           </div>
