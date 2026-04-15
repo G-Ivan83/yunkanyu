@@ -5,6 +5,7 @@ import { useDropzone } from 'react-dropzone';
 import { GoogleGenAI } from '@google/genai';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorkerUrl from 'pdfjs-dist/build/pdf.worker.mjs?url';
+import * as mammoth from 'mammoth';
 import { cn } from './lib/utils';
 import { ARCHITECTURE_KNOWLEDGE } from './knowledge';
 
@@ -875,18 +876,29 @@ const KnowledgeBaseModal: React.FC<{
 
     setIsProcessing(true);
     try {
-      setProgressText('正在解析 PDF 文本...');
-      const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjsLib.getDocument({ 
-        data: new Uint8Array(arrayBuffer),
-        standardFontDataUrl: `https://unpkg.com/pdfjs-dist@5.6.205/standard_fonts/`,
-      }).promise;
       let fullText = '';
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const content = await page.getTextContent();
-        const pageText = content.items.map((item: any) => item.str).join(' ');
-        fullText += pageText + '\n';
+      const fileExt = file.name.split('.').pop()?.toLowerCase();
+
+      if (fileExt === 'pdf') {
+        setProgressText('正在解析 PDF 文本...');
+        const arrayBuffer = await file.arrayBuffer();
+        const pdf = await pdfjsLib.getDocument({ 
+          data: new Uint8Array(arrayBuffer),
+          standardFontDataUrl: `https://unpkg.com/pdfjs-dist@5.6.205/standard_fonts/`,
+        }).promise;
+        for (let i = 1; i <= pdf.numPages; i++) {
+          const page = await pdf.getPage(i);
+          const content = await page.getTextContent();
+          const pageText = content.items.map((item: any) => item.str).join(' ');
+          fullText += pageText + '\n';
+        }
+      } else if (fileExt === 'docx' || fileExt === 'doc') {
+        setProgressText('正在解析 Word 文本...');
+        const arrayBuffer = await file.arrayBuffer();
+        const result = await mammoth.extractRawText({ arrayBuffer });
+        fullText = result.value;
+      } else {
+        throw new Error("不支持的文件格式，仅支持 PDF 和 Word 文档");
       }
 
       setProgressText('正在进行文本分块...');
@@ -917,7 +929,7 @@ const KnowledgeBaseModal: React.FC<{
       setProgressText('');
     } catch (err: any) {
       console.error(err);
-      alert("处理 PDF 失败: " + (err.message || err));
+      alert("处理文档失败: " + (err.message || err));
     } finally {
       setIsProcessing(false);
     }
@@ -925,7 +937,11 @@ const KnowledgeBaseModal: React.FC<{
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ 
     onDrop,
-    accept: { 'application/pdf': ['.pdf'] },
+    accept: { 
+      'application/pdf': ['.pdf'],
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
+      'application/msword': ['.doc']
+    },
     disabled: isProcessing
   } as any);
 
@@ -965,7 +981,8 @@ const KnowledgeBaseModal: React.FC<{
             ) : (
               <div className="flex flex-col items-center gap-4 text-ink/60">
                 <FileText className="w-8 h-8" strokeWidth={1} />
-                <p className="tracking-widest text-sm font-light">点击或拖拽上传 PDF 典籍</p>
+                <p className="tracking-widest text-sm font-light">点击或拖拽上传 PDF / Word 典籍</p>
+                <p className="text-xs opacity-60 tracking-widest font-light mt-2">支持 .pdf, .docx, .doc 格式</p>
               </div>
             )}
           </div>
