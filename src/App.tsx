@@ -34,6 +34,7 @@ interface AnalysisResult {
   imagePrompts?: string[];
   generatedImages: string[];
   references?: { source: string; text: string }[];
+  citedReferences?: { source: string; text: string }[];
 }
 
 interface KBChunk {
@@ -225,7 +226,7 @@ export default function App() {
             }));
 
             similarities.sort((a, b) => b.similarity - a.similarity);
-            const topChunks = similarities.slice(0, 3);
+            const topChunks = similarities.slice(0, 15);
 
             augmentedContext = `
             【知识库检索资料 (RAG)】：
@@ -246,9 +247,11 @@ export default function App() {
       作为一位精通传统风水学、环境行为学和人居科学的室内设计大师。
       ${augmentedContext}
       
-      【重要指令：引用原文】
-      在你的分析和建议中，请务必**直接引用**上述提供的【知识库检索资料 (RAG)】中的原文片段来佐证你的观点。
-      引用的格式请使用引号，并在句末标明来源，例如：“[引用的原文]”（《来源》）。
+      【重要指令：严格基于原文】
+      1. 在你的分析和建议中，请务必**直接引用**上述提供的【知识库检索资料 (RAG)】中的原文片段来佐证你的观点。
+      2. 如果提供的资料中没有直接针对该户型的具体描述，请提取资料中的核心理念（如某种风水原则、环境心理学思想）并将其应用到当前户型中。
+      3. **绝不能脱离提供的资料凭空捏造。** 所有的分析都必须能从提供的资料中找到理论支撑。
+      4. 引用的格式请使用引号，并在句末标明来源，例如：“[引用的原文]”（《来源》）。
       
       请分析这张户型图，并提供以下格式的JSON输出（不要包含markdown代码块标记，直接输出纯JSON）：
       {
@@ -257,6 +260,12 @@ export default function App() {
         "suggestions": "具体的室内设计建议（如具体的材质、色彩色号、家具摆放位置等）。必须以具体的要点（1. 2. 3.）形式列出，要求非常具体、可落地，绝不能空泛。需包含原文引用。",
         "imagePrompts": [
           "3个用于生成设计效果图的英文Prompt。必须严格基于上传户型图中的实际空间结构（如户型图上实际存在的主卧、客厅等）来生成，不要自己编造不存在的空间。描述要详细，包含空间名称、古典/高级美院风格、水墨或工笔画质感、具体的材质和光影等关键词。"
+        ],
+        "citedReferences": [
+          {
+            "source": "你实际引用的资料来源名称",
+            "text": "你实际引用的原文片段（请直接从提供的资料中摘录）"
+          }
         ]
       }
       `;
@@ -299,7 +308,9 @@ export default function App() {
       setAnalysis({
         ...parsedResult,
         generatedImages,
-        references
+        references: parsedResult.citedReferences && parsedResult.citedReferences.length > 0 
+          ? parsedResult.citedReferences 
+          : references
       });
       setAppState('results');
 
