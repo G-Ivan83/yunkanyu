@@ -195,7 +195,7 @@ export default function App() {
             if (response.embeddings && response.embeddings[0].values) {
               newChunks.push({
                 id: Math.random().toString(36).substring(7),
-                source: '《人居境象·内置典籍》',
+                source: '《八宅明镜》《人居环境科学导论》',
                 text: text,
                 embedding: response.embeddings[0].values
               });
@@ -327,7 +327,7 @@ export default function App() {
       <header className="absolute top-0 w-full p-8 flex justify-between items-center z-50">
         <div className="flex items-center gap-4 opacity-80 hover:opacity-100 transition-opacity cursor-pointer" onClick={() => setAppState('landing')}>
           <div className="w-1 h-6 bg-primary/60" />
-          <span className="font-serif text-xl tracking-[0.3em] font-light">人居境象</span>
+          <span className="font-serif text-xl tracking-[0.3em] font-light">云堪舆</span>
         </div>
         <div className="flex items-center gap-4">
           <button 
@@ -461,7 +461,7 @@ const LandingView: React.FC<{ onStart: () => void }> = ({ onStart }) => {
           className="text-lg md:text-xl text-ink/60 mb-16 leading-[2.5] font-light tracking-[0.3em] max-w-md"
         >
           融合环境行为学、传统风水与人居科学<br/>
-          以AI之眼，洞见空间之气韵，重塑理想居所
+          以AI之眼，洞见空间气韵，重塑理想居所
         </motion.p>
         
         <motion.button 
@@ -1134,7 +1134,7 @@ const ReportView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
             <ul className="list-disc pl-6 space-y-4">
               <li>
                 <strong className="font-medium text-ink">混合知识库构建 (Hybrid Knowledge Base)</strong><br/>
-                <span className="opacity-80">系统支持“开发者预置”与“用户自定义上传”双轨并行的知识库。开发者可预置核心理论（如《人居境象·内置典籍》），用户也可在“典籍库”中上传专业的 PDF 文献。前端利用 <code>pdf.js</code> 解析文本，进行分块 (Chunking) 后，调用 Gemini <code>text-embedding-004</code> 模型生成高维向量 (Embeddings) 并持久化存储。</span>
+                <span className="opacity-80">系统支持“开发者预置”与“用户自定义上传”双轨并行的知识库。开发者可预置核心理论（如《八宅明镜》《人居环境科学导论》），用户也可在“典籍库”中上传专业的 PDF 文献。前端利用 <code>pdf.js</code> 解析文本，进行分块 (Chunking) 后，调用 Gemini <code>text-embedding-004</code> 模型生成高维向量 (Embeddings) 并持久化存储。</span>
               </li>
               <li>
                 <strong className="font-medium text-ink">语义检索与上下文注入</strong><br/>
